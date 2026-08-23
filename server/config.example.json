@@ -1,0 +1,7 @@
+{
+  "provider": "deepseek",
+  "base_url": "https://api.deepseek.com",
+  "api_key": "在此填入你的 API Key（仅存本机后端，前端不暴露）",
+  "model": "deepseek-v4-flash",
+  "timeout": 10
+}

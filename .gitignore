@@ -1,0 +1,21 @@
+# Python
+server/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 密钥与用户数据（API Key / 个人热词仅存本机，勿提交）
+server/config.json
+server/hotwords.json
+
+# 临时文件 / 日志
+server/_test_tts.wav
+*.log
+
+# 操作系统
+Thumbs.db
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/

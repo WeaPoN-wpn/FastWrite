@@ -1,0 +1,10 @@
+# FastWrite 本地识别后端依赖（Windows / Python 3.10+）
+# torch 使用 CPU 版（Windows 上 PyPI 默认即 CPU 构建；如需另配源见 README）
+torch>=2.1
+torchaudio>=2.1
+numpy<2
+funasr>=1.1.0
+modelscope>=1.15
+fastapi>=0.110
+uvicorn[standard]>=0.29
+openai>=1.40

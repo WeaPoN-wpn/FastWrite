@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FastWrite · 语音速记</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=DotGothic16&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   FastWrite 掌机 · 与 Handheld-prototype 完全一致的外观，接真实后端
+   接口：GET /health · GET|POST /hotwords · POST /rewrite · WS /ws/asr
+   ══════════════════════════════════════════════════════════════════ */
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#15171a;font-family:"Noto Sans SC",sans-serif}
+a{color:#e0552b}a:hover{color:#ff7a4d}
+@keyframes fwBlink{0%,49%{opacity:1}50%,100%{opacity:.15}}
+@keyframes fwScan{0%{transform:translateY(-100%)}100%{transform:translateY(1200%)}}
+input,textarea{font-family:inherit}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:#3a4a3f;border-radius:3px}
+
+/* 字体简写 */
+.bar{font-family:'Barlow Condensed',sans-serif}
+.dot16{font-family:'DotGothic16',monospace}
+
+/* ── 舞台 / 机身 ── */
+.stage{min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:48px 16px;background:radial-gradient(ellipse at 50% 0%,#25282d 0%,#131417 70%);perspective:2200px}
+.device{width:452px;position:relative;transform-style:preserve-3d;
+  transition:transform .75s cubic-bezier(.6,.05,.25,1);transform:rotateY(0deg)}
+.device.flipped{transform:rotateY(180deg)}
+.front{backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  border-radius:26px 26px 44px 44px;padding:16px 18px 22px;
+  background:linear-gradient(163deg,#4a4f55 0%,#33373c 18%,#2b2e33 55%,#212328 100%);
+  box-shadow:0 40px 70px -20px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.16),inset 0 -3px 8px rgba(0,0,0,.5),0 0 0 1px #171a1d}
+.back{position:absolute;inset:0;transform:rotateY(180deg);
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  border-radius:26px 26px 44px 44px;padding:20px 20px 24px;
+  background:linear-gradient(163deg,#3f4349 0%,#2c2f34 40%,#1e2024 100%);
+  box-shadow:0 40px 70px -20px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.12),0 0 0 1px #171a1d;
+  display:flex;flex-direction:column}
+
+/* ── 卡带 ── */
+.cart-wrap{display:flex;justify-content:center;margin-bottom:14px}
+.cart{position:relative;width:210px;cursor:pointer;filter:drop-shadow(0 6px 10px rgba(0,0,0,.5))}
+.cart .slot-top{height:9px;border-radius:3px 3px 0 0;background:linear-gradient(#141518,#25282c);
+  box-shadow:inset 0 3px 5px rgba(0,0,0,.9)}
+.cart .body{margin:0 12px;height:34px;border-radius:0 0 6px 6px;
+  background:linear-gradient(#57452f,#3f3324);border:1px solid #1c1712;border-top:none;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:height .18s, background .18s}
+.cart:hover .body{height:38px;background:linear-gradient(#6b5439,#4a3b28)}
+.cart .pad{width:26px;height:14px;border-radius:2px;background:#22252a;box-shadow:inset 0 1px 2px #000}
+.cart .tt{font-size:13px;letter-spacing:.22em;color:#d9c8a8;text-transform:uppercase}
+
+/* ── 屏框 ── */
+.bezel{position:relative;border-radius:14px;padding:16px 16px 14px;
+  background:linear-gradient(#1b1d20,#26292d);
+  box-shadow:inset 0 3px 9px rgba(0,0,0,.85),0 1px 0 rgba(255,255,255,.1)}
+.bezel-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;
+  font-size:11px;letter-spacing:.24em;color:#6d747c}
+.eng-led{display:flex;align-items:center;gap:6px;color:#4e545a}
+.eng-led .ld{width:7px;height:7px;border-radius:50%;background:#3a3f45;box-shadow:inset 0 1px 2px #000;
+  transition:background .25s, box-shadow .25s}
+.eng-led.on{color:#6d747c}
+.eng-led.on .ld{background:#4ddb7a;box-shadow:0 0 8px rgba(77,219,122,.7)}
+.eng-led.loading{color:#a58254}
+.eng-led.loading .ld{background:#ffb066;box-shadow:0 0 6px rgba(255,176,102,.6);animation:fwBlink 1s steps(1) infinite}
+
+/* ── 屏幕 ── */
+.screen{position:relative;height:300px;border-radius:6px;overflow:hidden;
+  background:linear-gradient(#0d1310,#111a13);
+  box-shadow:inset 0 0 26px rgba(0,0,0,.9),inset 0 0 0 1px #050806;
+  display:flex;flex-direction:column}
+.scanlines{position:absolute;inset:0;pointer-events:none;z-index:3;
+  background:repeating-linear-gradient(180deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+.scanlight{position:absolute;left:0;right:0;height:26px;z-index:2;pointer-events:none;
+  background:linear-gradient(rgba(255,170,90,.055),transparent);animation:fwScan 5.5s linear infinite}
+.text{flex:1;overflow-y:auto;padding:14px 14px 8px;font-size:15px;line-height:1.85;color:#ffb066;
+  text-shadow:0 0 9px rgba(255,140,60,.4);word-break:break-word;text-wrap:pretty}
+.text .im{color:#7d6a4e}
+.caret{display:inline-block;width:8px;height:15px;margin-left:2px;background:#ffb066;
+  vertical-align:-2px;animation:fwBlink 1s steps(1) infinite}
+.wave{display:flex;align-items:flex-end;gap:2px;height:26px;padding:0 14px 6px}
+.wave i{flex:1;background:#3f6a48;border-radius:1px;min-height:2px;height:2px}
+.statusbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 12px;
+  background:rgba(255,150,70,.09);border-top:1px solid rgba(255,150,70,.18);
+  font-family:'DotGothic16',monospace;font-size:13px;color:#ffb066;letter-spacing:.06em}
+.statusbar .lft{display:flex;align-items:center;gap:7px}
+.statusbar .lft .dt{width:8px;height:8px;border-radius:50%;background:#5d7a63;transition:background .2s}
+.statusbar .rgt{display:flex;align-items:center;gap:10px;color:#a58254}
+.statusbar .hw{display:flex;align-items:center;gap:4px;color:#ffb066}
+.statusbar .hw .box{width:11px;height:8px;border-radius:1px;border:1px solid currentColor}
+
+/* ── 丝印行 ── */
+.silk{display:flex;justify-content:space-between;align-items:center;padding:11px 10px 0;
+  font-size:11px;letter-spacing:.26em;color:#6d747c}
+
+/* ── 操作区 ── */
+.controls{display:flex;justify-content:space-between;align-items:flex-end;padding:8px 10px 4px}
+.dpad{position:relative;width:126px;height:126px;border-radius:50%;cursor:pointer;
+  background:linear-gradient(160deg,#2a2d32,#1a1c20);
+  box-shadow:inset 0 3px 8px rgba(0,0,0,.75),inset 0 -1px 0 rgba(255,255,255,.08),0 1px 0 rgba(255,255,255,.08)}
+.dpad .ring{position:absolute;inset:11px;border-radius:50%;background:linear-gradient(155deg,#33373d,#212429);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 5px rgba(0,0,0,.5)}
+.dpad .bv,.dpad .bh{position:absolute;border-radius:7px;
+  background:linear-gradient(155deg,#3c4046,#22252a);
+  box-shadow:0 3px 0 #131518,inset 0 1px 0 rgba(255,255,255,.14),0 5px 9px rgba(0,0,0,.45);
+  transition:background .2s, box-shadow .2s}
+.dpad .bv{left:47px;top:16px;width:32px;height:94px}
+.dpad .bh{top:47px;left:16px;width:94px;height:32px}
+.dpad .lb{position:absolute;left:47px;top:47px;width:32px;height:32px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  color:#8d949c;font-size:13px;letter-spacing:.08em;transition:color .2s}
+body.recording .dpad .bv,body.recording .dpad .bh{
+  background:linear-gradient(155deg,#e0552b,#a5300f);
+  box-shadow:0 2px 0 #6d1e0c,inset 0 1px 0 rgba(255,255,255,.28),0 0 16px rgba(224,85,43,.35)}
+body.recording .dpad .lb{color:#fff2ec}
+
+.ctl-right{display:flex;flex-direction:column;align-items:center;gap:12px}
+/* 引擎拨杆 */
+.lever{position:relative;width:126px;height:22px;border-radius:11px;cursor:pointer;
+  background:linear-gradient(#1b1d21,#26292e);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.08)}
+.lever .lg{position:absolute;top:0;width:63px;height:22px;display:flex;align-items:center;justify-content:center;
+  font-size:10px;letter-spacing:.16em;z-index:2;pointer-events:none;transition:color .18s}
+.lever .lg.l{left:0;color:#5d646c}
+.lever .lg.r{right:0;color:#f0e7df}
+.lever .knob{position:absolute;top:2px;left:63px;width:60px;height:18px;border-radius:9px;
+  background:linear-gradient(#565b62,#33373d);
+  box-shadow:0 2px 4px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.28);
+  transition:left .18s cubic-bezier(.5,0,.2,1);display:flex;align-items:center;justify-content:center;gap:3px}
+.lever .knob i{width:1.5px;height:8px;border-radius:1px;background:rgba(0,0,0,.32);
+  box-shadow:1px 0 0 rgba(255,255,255,.12)}
+.lever.local .knob{left:3px}
+.lever.local .lg.l{color:#f0e7df}
+.lever.local .lg.r{color:#5d646c}
+.lever.local.broken .lg.l{color:#ff6a45}
+.lever.local.loading .lg.l{color:#ffb066}
+
+/* 菱形四键 */
+.diamond{position:relative;width:126px;height:126px}
+.diamond .plate{position:absolute;left:23px;top:23px;width:80px;height:80px;border-radius:14px;
+  background:linear-gradient(#262a2e,#1c1f23);
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.07);transform:rotate(45deg)}
+.dbtn{position:absolute;width:38px;height:38px;border-radius:50%;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.1em;
+  user-select:none;transition:transform .06s, box-shadow .06s, background .06s}
+.dbtn.g{color:#f2e6de;background:linear-gradient(#4d5259,#31353a);
+  box-shadow:0 4px 0 #16181b,0 6px 9px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.18)}
+.dbtn.g:active{background:linear-gradient(#3a3e43,#2a2d31);
+  box-shadow:0 1px 0 #16181b,inset 0 2px 5px rgba(0,0,0,.5);transform:translateY(3px)}
+.dbtn.o{color:#fff1e9;background:linear-gradient(#c9612f,#a1441c);
+  box-shadow:0 4px 0 #5c2410,0 6px 9px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.24)}
+.dbtn.o:active{background:linear-gradient(#a94f26,#8a3a16);
+  box-shadow:0 1px 0 #5c2410,inset 0 2px 5px rgba(0,0,0,.45);transform:translateY(3px)}
+.dbtn.up{left:44px;top:1px}
+.dbtn.rt{right:1px;top:44px}
+.dbtn.dn{left:44px;bottom:1px}
+.dbtn.lf{left:1px;top:44px}
+
+/* ── 历史卡槽 ── */
+.hist{margin-top:18px;padding:12px 12px 13px;border-radius:12px;
+  background:linear-gradient(#24272b,#1c1f22);
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.07)}
+.hist-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;
+  font-size:11px;letter-spacing:.24em;color:#6d747c}
+.hist-head .clr{cursor:pointer;color:#6d747c}
+.hist-head .clr:hover{color:#e0703f}
+.hist-list{display:flex;flex-direction:column;gap:7px}
+.slot{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;
+  background:#212428;border:1px solid #33383d;min-height:34px}
+.slot:hover{background:#2f3439;border-color:#454b52}
+.slot.has{background:#282c31}
+.slot.active{background:#33383d;border-color:#c9612f}
+.slot .tm{font-family:'DotGothic16',monospace;font-size:11px;color:#4a5057;white-space:nowrap}
+.slot .tx{flex:1;font-size:12.5px;line-height:1.5;color:#4a5057;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .tg{font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.16em;color:transparent}
+.slot.has .tm{color:#8d949c}
+.slot.has .tx{color:#ddd4cc}
+.slot.has .tg{color:#c9612f}
+
+/* ── 品牌 / 螺丝 ── */
+.brand{display:flex;justify-content:center;align-items:center;padding:14px 6px 0;
+  font-size:12px;letter-spacing:.3em;color:#787f87}
+.screws{display:flex;justify-content:space-between;align-items:center;padding:14px 10px 2px}
+.screw{width:12px;height:12px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#41464c,#1a1c1f);box-shadow:inset 0 0 3px #000}
+.screw i{display:block;width:8px;height:1.5px;background:#0f1113;margin:5px auto}
+
+/* ── 背面：热词卡带 ── */
+.back-head{display:flex;justify-content:space-between;align-items:center;
+  font-size:12px;letter-spacing:.26em;color:#767d85}
+.back-head .bk{cursor:pointer;padding:5px 12px;border-radius:6px;color:#e6ddd6;
+  background:linear-gradient(#4d5259,#31353a);
+  box-shadow:0 3px 0 #191b1e,inset 0 1px 0 rgba(255,255,255,.16);
+  transition:transform .06s, box-shadow .06s, background .06s}
+.back-head .bk:active{background:linear-gradient(#3a3e43,#2a2d31);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.5);transform:translateY(3px)}
+.hw-panel{margin-top:16px;flex:1;border-radius:10px;padding:12px;
+  background:linear-gradient(#191b1e,#212429);box-shadow:inset 0 3px 9px rgba(0,0,0,.8);
+  display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.hw-count{font-family:'DotGothic16',monospace;font-size:12px;color:#8d949c;letter-spacing:.05em}
+.hw-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:4px}
+.hw-row{display:flex;align-items:center;gap:8px}
+.hw-row .no{font-family:'DotGothic16',monospace;font-size:11px;color:#5d646c;width:20px}
+.hw-row input{flex:1;padding:8px 10px;border-radius:5px;border:1px solid #363b41;background:#101316;
+  color:#ffb066;font-size:14px;outline:none}
+.hw-row input:focus{border-color:#c9612f}
+.hw-row .del{cursor:pointer;width:28px;height:28px;border-radius:5px;display:flex;align-items:center;
+  justify-content:center;color:#6d747c;background:#2a2e33}
+.hw-row .del:hover{color:#fff;background:#a1441c}
+.hw-add{cursor:pointer;text-align:center;padding:9px;border-radius:6px;border:1px dashed #454b52;
+  color:#98a0a8;font-size:13px}
+.hw-add:hover{border-color:#c9612f;color:#e0803f}
+.batt{margin-top:16px;height:96px;border-radius:8px;background:linear-gradient(#2a2e33,#212429);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 6px rgba(0,0,0,.4);position:relative}
+.batt .lbl{position:absolute;left:14px;top:12px;font-family:'Barlow Condensed',sans-serif;
+  font-size:11px;letter-spacing:.22em;color:#5d646c}
+.batt .sc{position:absolute;bottom:10px;width:14px;height:14px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#41464c,#1a1c1f)}
+.batt .sc i{display:block;width:9px;height:1.5px;background:#0f1113;margin:6px auto}
+
+/* toast */
+#toast{position:fixed;left:50%;bottom:36px;transform:translateX(-50%) translateY(8px);z-index:60;
+  background:#2a1910;color:#ffd9a8;font-size:13px;padding:10px 18px;border-radius:8px;
+  border:1px solid rgba(255,176,102,.4);box-shadow:0 8px 24px rgba(0,0,0,.5);
+  opacity:0;pointer-events:none;transition:opacity .2s, transform .2s;max-width:80vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%)}
+@media (max-width:520px){.device{width:100%;max-width:452px}}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="device" id="device">
+
+    <!-- ═══════════ 正面 ═══════════ -->
+    <div class="front">
+
+      <!-- 卡带槽 -->
+      <div class="cart-wrap">
+        <div class="cart" id="cart" title="热词卡带">
+          <div class="slot-top"></div>
+          <div class="body">
+            <div class="pad"></div>
+            <div class="tt bar">Hotwords</div>
+            <div class="pad"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 屏框 -->
+      <div class="bezel">
+        <div class="bezel-top bar">
+          <span>FASTWRITE</span>
+          <span class="eng-led" id="engLed" title="本地 FunASR 引擎状态"><span class="ld"></span>LOCAL</span>
+        </div>
+
+        <div class="screen">
+          <div class="scanlines"></div>
+          <div class="scanlight"></div>
+
+          <div class="text" id="text"><span id="finalText"></span><span class="im" id="interimText"></span><span class="caret" id="caret" style="display:none"></span></div>
+
+          <div class="wave" id="wave"></div>
+
+          <div class="statusbar">
+            <span class="lft"><span class="dt" id="stDot"></span><span id="stTxt">待机</span></span>
+            <span class="rgt">
+              <span class="hw" id="hwBadge" title="热词生效"><span class="box"></span><span id="hwBadgeTxt">HW0</span></span>
+              <span id="charCnt">0字</span>
+              <span id="engLabel" title="FunASR 本地引擎">LOCAL</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="silk bar"><span>FW-01</span><span>ASR ENGINE</span></div>
+
+      <!-- 操作区 -->
+      <div class="controls">
+        <div class="dpad bar" id="dpad" title="开始 / 结束录制（空格）">
+          <div class="ring"></div>
+          <div class="bv"></div>
+          <div class="bh"></div>
+          <div class="lb"><span id="recLabel">REC</span></div>
+        </div>
+
+        <div class="ctl-right">
+          <div class="lever local bar" id="lever" title="切换识别引擎">
+            <div class="lg l">LOCAL</div>
+            <div class="lg r">WEB</div>
+            <div class="knob"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+
+          <div class="diamond">
+            <div class="plate"></div>
+            <div class="dbtn g up" data-key="fix" title="纠错">FIX</div>
+            <div class="dbtn o rt" data-key="pol" title="润色">POL</div>
+            <div class="dbtn g dn" data-key="cpy" title="复制">CPY</div>
+            <div class="dbtn o lf" data-key="raw" title="原文 / AI 版">RAW</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 历史卡槽 -->
+      <div class="hist">
+        <div class="hist-head bar">
+          <span>SLOT 01—03</span><span class="clr" id="clearHist">CLEAR</span>
+        </div>
+        <div class="hist-list" id="histList"></div>
+      </div>
+
+      <div class="brand bar"><span>Created by WeaPoN</span></div>
+
+      <div class="screws">
+        <div class="screw"><i style="transform:rotate(35deg)"></i></div>
+        <div class="screw"><i style="transform:rotate(-52deg)"></i></div>
+      </div>
+    </div>
+
+    <!-- ═══════════ 背面：热词表 ═══════════ -->
+    <div class="back">
+      <div class="back-head bar">
+        <span>HOTWORD CARTRIDGE</span>
+        <span class="bk" id="backClose">返回</span>
+      </div>
+
+      <div class="hw-panel">
+        <div class="hw-count" id="hwCount">一行一个词 · 共 0 条</div>
+        <div class="hw-list" id="hwList"></div>
+        <div class="hw-add" id="hwAdd">＋ 新增一行</div>
+      </div>
+
+      <div class="batt">
+        <div class="lbl">BATT · 4×AA</div>
+        <div class="sc" style="left:12px"><i style="transform:rotate(-45deg)"></i></div>
+        <div class="sc" style="right:12px"><i style="transform:rotate(45deg)"></i></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const device=$('device'), cart=$('cart'), textEl=$('text'),
+      finalEl=$('finalText'), interimEl=$('interimText'), caret=$('caret'),
+      wave=$('wave'), stDot=$('stDot'), stTxt=$('stTxt'),
+      hwBadge=$('hwBadge'), hwBadgeTxt=$('hwBadgeTxt'), charCnt=$('charCnt'),
+      engLabel=$('engLabel'), engLed=$('engLed'), lever=$('lever'),
+      dpad=$('dpad'), recLabel=$('recLabel'), histList=$('histList'), toastEl=$('toast');
+
+const STATUS={
+  idle:['待机','#5d7a63'], recording:['录制中','#ff4d2b'], asr:['识别中','#ffb066'],
+  ai:['AI处理','#ffb066'], copied:['已复制','#4ddb7a']
+};
+
+/* ---------- 状态 ---------- */
+let status='idle';
+let finalText='', interimText='';
+let rawText='', aiText='';
+let history=[], activeSlot=0;
+let hotwords=[];
+let engine='local';         // 拨杆档位：'local' | 'web'
+let localAvailable=false;   // /health 探测：本地后端是否可达
+let engineReady=false;      // /health 探测：FunASR 模型是否已加载完成
+let llmAvailable=false;     // 后端是否配置了 LLM
+let userStopped=false, cancelled=false;
+
+const isRecording=()=>status==='recording';
+const effEngine=()=> (engine==='local'&&localAvailable&&engineReady) ? 'local' : 'web';
+
+/* ---------- 渲染 ---------- */
+function renderScreen(){
+  finalEl.textContent=finalText;
+  interimEl.textContent=interimText;
+  caret.style.display=isRecording()?'':'none';
+  charCnt.textContent=(finalText+interimText).length+'字';
+  if(isRecording()) textEl.scrollTop=textEl.scrollHeight;
+}
+function setStatus(s){
+  status=s;
+  const st=STATUS[s]||STATUS.idle;
+  stTxt.textContent=st[0]; stDot.style.background=st[1];
+  recLabel.textContent=s==='recording'?'STOP':'REC';
+  document.body.classList.toggle('recording',s==='recording');
+  renderScreen();
+}
+function renderEngine(){
+  const wantLocal=engine==='local';
+  const down=!localAvailable, loading=localAvailable&&!engineReady;
+  const broken=wantLocal&&down, waiting=wantLocal&&loading;
+  lever.classList.toggle('local',wantLocal);
+  lever.classList.toggle('broken',broken);
+  lever.classList.toggle('loading',waiting);
+  engLed.classList.toggle('on',localAvailable&&engineReady);
+  engLed.classList.toggle('loading',loading);
+  engLabel.textContent = broken ? 'LOCAL ×' : waiting ? 'LOCAL…' : (wantLocal?'LOCAL':'WEB');
+  engLabel.style.color = broken ? '#ff6a45' : waiting ? '#ffb066' : '#a58254';
+  engLabel.title = broken ? '本地引擎不可用，已自动降级为浏览器识别'
+                          : waiting ? 'FunASR 模型加载中，本次录制将暂用浏览器识别'
+                          : (wantLocal?'FunASR 本地引擎':'浏览器识别（兜底）');
+}
+function renderHWBadge(){
+  const n=hotwords.filter(w=>w.trim()).length;
+  hwBadge.style.display = n ? '' : 'none';
+  hwBadgeTxt.textContent='HW'+n;
+}
+function renderSlots(){
+  histList.innerHTML='';
+  for(let i=0;i<3;i++){
+    const e=history[i];
+    const row=document.createElement('div');
+    row.className='slot'+(e?' has':'')+(e&&i===activeSlot?' active':'');
+    row.innerHTML='<span class="tm"></span><span class="tx"></span><span class="tg"></span>';
+    row.querySelector('.tm').textContent = e?e.time:'--:--:--';
+    row.querySelector('.tx').textContent = e?e.text:'空卡槽';
+    row.querySelector('.tg').textContent = e?e.tag:'';
+    if(e) row.addEventListener('click',()=>{
+      activeSlot=i; finalText=e.text; interimText=''; rawText=''; aiText='';
+      renderSlots(); renderScreen(); copy(e.text);
+    });
+    histList.appendChild(row);
+  }
+}
+function now(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+
+/* ---------- Toast ---------- */
+let tt; function toast(m){ toastEl.textContent=m; toastEl.classList.add('show');
+  clearTimeout(tt); tt=setTimeout(()=>toastEl.classList.remove('show'),2400); }
+
+/* ---------- 剪贴板 ---------- */
+let copyT;
+async function copy(text){
+  if(!text) return;
+  let ok=false;
+  try{ if(navigator.clipboard&&navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); ok=true; } }catch(e){}
+  if(!ok){
+    try{ const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(ta); ta.select();
+      ok=document.execCommand('copy'); document.body.removeChild(ta); }catch(e){}
+  }
+  if(!ok){ toast('⚠️ 自动复制失败，请重试'); return; }
+  setStatus('copied');
+  clearTimeout(copyT);
+  copyT=setTimeout(()=>{ if(status==='copied') setStatus('idle'); },2200);
+}
+
+/* ---------- 波形 ---------- */
+function buildWave(){ wave.innerHTML=''; for(let i=0;i<28;i++) wave.appendChild(document.createElement('i')); }
+function resetWave(){ [...wave.children].forEach(b=>b.style.height='2px'); }
+buildWave();
+
+const Wave={
+  raf:null, analyser:null,
+  attach(analyser){
+    this.analyser=analyser;
+    const data=new Uint8Array(analyser.frequencyBinCount);
+    const bars=[...wave.children];
+    const tick=()=>{
+      if(!this.analyser) return;
+      this.analyser.getByteFrequencyData(data);
+      for(let i=0;i<bars.length;i++){
+        const v=data[Math.floor(i*data.length/28)]/255;
+        bars[i].style.height=Math.max(2,Math.round(v*20))+'px';
+      }
+      this.raf=requestAnimationFrame(tick);
+    };
+    tick();
+  },
+  detach(){ if(this.raf) cancelAnimationFrame(this.raf); this.raf=null; this.analyser=null; resetWave(); }
+};
+
+/* ══════════════════════════════════════════════════════════════
+   本地引擎 Provider：WebSocket → FunASR（真实识别 + 真实波形）
+   ══════════════════════════════════════════════════════════════ */
+const LocalProvider={
+  ws:null,ctx:null,stream:null,node:null,stopGuard:null,
+
+  start(){
+    navigator.mediaDevices.getUserMedia({audio:{channelCount:1}}).then(stream=>{
+      if(!isRecording()){ stream.getTracks().forEach(t=>t.stop()); return; }
+      this.stream=stream;
+      const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws/asr');
+      this.ws=ws;
+      ws.onopen=()=>ws.send(JSON.stringify({type:'init',hotwords:hotwords.filter(w=>w.trim())}));
+      ws.onmessage=ev=>{
+        let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+        if(m.type==='interim'){ interimText=m.text.slice(finalText.length); renderScreen(); }
+        else if(m.type==='final'){ finalText=m.text; interimText=''; renderScreen(); }
+        else if(m.type==='done'){ this.cleanup(); finishRecord(); }
+      };
+      ws.onclose=()=>{
+        if(isRecording()&&!userStopped){ toast('⚠️ 本地引擎连接断开'); this.cleanup(); setStatus('idle'); }
+      };
+
+      // 16kHz 单声道：Analyser（波形） + ScriptProcessor（PCM 上行）
+      const ctx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+      this.ctx=ctx;
+      const src=ctx.createMediaStreamSource(stream);
+      const an=ctx.createAnalyser(); an.fftSize=128; an.smoothingTimeConstant=.75;
+      const node=ctx.createScriptProcessor(4096,1,1); this.node=node;
+      node.onaudioprocess=e=>{
+        if(!ws||ws.readyState!==1) return;
+        const f32=e.inputBuffer.getChannelData(0), i16=new Int16Array(f32.length);
+        for(let i=0;i<f32.length;i++){ const s=Math.max(-1,Math.min(1,f32[i])); i16[i]=s<0?s*0x8000:s*0x7fff; }
+        if(ws.bufferedAmount<262144) ws.send(i16.buffer);
+      };
+      src.connect(an); an.connect(node); node.connect(ctx.destination);
+      Wave.attach(an);
+    }).catch(err=>{
+      toast('🔇 无法访问麦克风：'+(err&&err.name==='NotAllowedError'?'请在地址栏允许麦克风权限':(err&&err.message)||err));
+      this.cleanup(); finalText=''; interimText=''; setStatus('idle');
+    });
+  },
+
+  stop(){
+    userStopped=true; setStatus('asr');
+    if(this.ws&&this.ws.readyState===1){
+      try{ this.ws.send('{"type":"stop"}'); }
+      catch(e){ this.cleanup(); finishRecord(); return; }
+      clearTimeout(this.stopGuard);
+      this.stopGuard=setTimeout(()=>{ if(status==='asr'){ this.cleanup(); finishRecord(); } },4000);
+    }else{ this.cleanup(); finishRecord(); }
+  },
+  cancel(){ cancelled=true; userStopped=true; this.cleanup(); },
+  cleanup(){
+    clearTimeout(this.stopGuard);
+    Wave.detach();
+    try{ this.node&&this.node.disconnect(); }catch(e){}
+    try{ this.ctx&&this.ctx.close(); }catch(e){}
+    if(this.stream) this.stream.getTracks().forEach(t=>t.stop());
+    try{ this.ws&&this.ws.close(); }catch(e){}
+    this.node=this.ctx=this.stream=this.ws=null;
+  }
+};
+
+/* ══════════════════════════════════════════════════════════════
+   WEB 兜底 Provider：浏览器 SpeechRecognition + 真实波形
+   ══════════════════════════════════════════════════════════════ */
+const WebProvider={
+  SR: window.SpeechRecognition||window.webkitSpeechRecognition,
+  rec:null,ctx:null,stream:null,watchdog:null,restart:null,attempts:0,
+
+  start(){
+    // 波形（与识别相互独立，无权限时静默）
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      if(!isRecording()){ stream.getTracks().forEach(t=>t.stop()); return; }
+      this.stream=stream;
+      const ctx=new (window.AudioContext||window.webkitAudioContext)(); this.ctx=ctx;
+      const an=ctx.createAnalyser(); an.fftSize=128; an.smoothingTimeConstant=.75;
+      ctx.createMediaStreamSource(stream).connect(an);
+      Wave.attach(an);
+    }).catch(()=>{});
+    this.begin();
+  },
+  begin(){
+    if(this.rec) return;
+    if(!this.SR){ toast('当前浏览器不支持语音识别，请用 Chrome / Edge'); this.cancel(); setStatus('idle'); return; }
+    const r=new this.SR();
+    r.lang='zh-CN'; r.continuous=false; r.interimResults=true;   // 分段模式：停顿后自动开新段
+    r.onresult=e=>{
+      let it='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        if(e.results[i].isFinal) finalText+=e.results[i][0].transcript;
+        else it+=e.results[i][0].transcript;
+      }
+      interimText=it; renderScreen(); this.arm();
+    };
+    r.onerror=e=>{
+      if(e.error==='not-allowed'||e.error==='service-not-allowed'){
+        toast('🔇 无法访问麦克风：请在地址栏允许麦克风权限');
+        this.cancel(); finalText=''; interimText=''; setStatus('idle');
+      }
+      else if(e.error==='network') toast('🌐 浏览器识别需要联网');
+      else if(e.error!=='no-speech'&&e.error!=='aborted') toast('识别出错：'+e.error);
+    };
+    r.onend=()=>{
+      this.rec=null;
+      if(cancelled) return;
+      if(isRecording()&&!userStopped){ this.schedule(); return; }
+      this.cleanup(); finishRecord();
+    };
+    try{ r.start(); this.rec=r; this.attempts=0; this.arm(); }
+    catch(err){
+      this.rec=null; this.attempts++;
+      if(this.attempts>5){ toast('识别多次启动失败，请结束本次重试'); this.cancel(); setStatus('idle'); return; }
+      if(isRecording()&&!userStopped) this.schedule();
+    }
+  },
+  schedule(){ if(!isRecording()||userStopped||cancelled) return;
+    clearTimeout(this.restart);
+    this.restart=setTimeout(()=>{ if(isRecording()&&!userStopped&&!cancelled) this.begin(); },200); },
+  arm(){ clearTimeout(this.watchdog);
+    this.watchdog=setTimeout(()=>{ if(!isRecording()||userStopped||cancelled) return;
+      try{ this.rec&&this.rec.stop(); }catch(e){} this.rec=null; this.schedule(); },4000); },
+
+  stop(){
+    userStopped=true; setStatus('asr');
+    clearTimeout(this.restart); clearTimeout(this.watchdog);
+    if(this.rec){ try{ this.rec.stop(); }catch(e){ this.rec=null; this.cleanup(); finishRecord(); } }
+    else { this.cleanup(); finishRecord(); }
+  },
+  cancel(){
+    cancelled=true; userStopped=true;
+    clearTimeout(this.restart); clearTimeout(this.watchdog);
+    try{ this.rec&&this.rec.stop(); }catch(e){}
+    this.rec=null; this.cleanup();
+  },
+  cleanup(){
+    Wave.detach();
+    try{ this.ctx&&this.ctx.close(); }catch(e){}
+    if(this.stream) this.stream.getTracks().forEach(t=>t.stop());
+    this.ctx=this.stream=null;
+  }
+};
+
+const provider=()=> effEngine()==='local' ? LocalProvider : WebProvider;
+let activeProvider=null;
+
+/* ══════════════════════════════════════════════════════════════
+   录制主流程
+   ══════════════════════════════════════════════════════════════ */
+function toggleRecord(){
+  if(isRecording()) return activeProvider&&activeProvider.stop();
+  if(engine==='local'&&localAvailable&&!engineReady) toast('⏳ 本地引擎加载中，本次先用浏览器识别');
+  finalText=''; interimText=''; rawText=''; aiText='';
+  userStopped=false; cancelled=false; activeSlot=0;
+  setStatus('recording'); renderSlots();
+  activeProvider=provider();
+  activeProvider.start();
+}
+function cancelRecord(){
+  if(!isRecording()&&status!=='asr') return;
+  if(activeProvider) activeProvider.cancel();
+  finalText=''; interimText=''; setStatus('idle');
+  toast('已取消，未复制');
+}
+function finishRecord(){
+  if(cancelled){ cancelled=false; return; }
+  const text=(finalText+interimText).trim();
+  finalText=text; interimText=''; rawText=text; aiText='';
+  if(!text){ setStatus('idle'); renderScreen(); toast('没有听到声音'); return; }
+  history=[{time:now(),text,tag:'ASR'},...history].slice(0,3);
+  activeSlot=0; renderSlots(); renderScreen();
+  copy(text);
+}
+
+/* ---------- FIX / POL / RAW / CPY ---------- */
+function process(kind){
+  const src=finalText.trim();
+  if(!src||isRecording()||status==='ai') return;
+  if(effEngine()!=='local'){ toast('⚠️ AI 纠错 / 润色需要本地引擎在线'); return; }
+  if(!llmAvailable){ toast('⚠️ 未配置 LLM：在 server/config.json 填 api_key 后 FIX / POL 可用'); return; }
+  const base=rawText||src;
+  const mode=kind==='fix'?'correct':'polish';
+  setStatus('ai');
+  fetch('/rewrite',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:base,mode,hotwords:hotwords.filter(w=>w.trim())})})
+    .then(r=>r.ok?r.json():Promise.reject())
+    .then(j=>{
+      const out=(j&&j.text)?j.text:base;
+      if(!j||!j.rewritten||out===base){
+        finalText=base; rawText=base; renderScreen();
+        toast('⚠️ AI 未改动，已保留原文'); setStatus('idle'); return;
+      }
+      rawText=base; aiText=out; finalText=out;
+      const entry={time:now(),text:out,tag:kind==='fix'?'FIX':'POLISH'};
+      if(history.length) history[0]=entry; else history.unshift(entry);
+      activeSlot=0; renderSlots(); renderScreen();
+      copy(out);
+    })
+    .catch(()=>{ toast('⚠️ AI 处理失败，已保留原文'); setStatus('idle'); });
+}
+function toggleRaw(){
+  if(!rawText||isRecording()) return;
+  const showingRaw = finalText===rawText;
+  finalText = showingRaw ? (aiText||rawText) : rawText;
+  renderScreen();
+}
+function copyCurrent(){ const t=finalText.trim(); if(t) copy(t); }
+
+document.querySelectorAll('.dbtn').forEach(b=>b.addEventListener('click',()=>{
+  const k=b.dataset.key;
+  if(k==='fix') process('fix');
+  else if(k==='pol') process('polish');
+  else if(k==='cpy') copyCurrent();
+  else if(k==='raw') toggleRaw();
+}));
+
+/* ---------- 历史 ---------- */
+$('clearHist').addEventListener('click',()=>{ history=[]; activeSlot=0; renderSlots(); toast('已清空记录'); });
+
+/* ══════════════════════════════════════════════════════════════
+   引擎探测 / 拨杆 / 热词
+   ══════════════════════════════════════════════════════════════ */
+let readyPollT=null;
+async function probeHealth(){
+  try{
+    const r=await fetch('/health',{signal:AbortSignal.timeout(2500)});
+    const j=r.ok?await r.json():null;
+    if(!j||j.engine!=='funasr') throw new Error('no backend');
+    const wasReady=engineReady;
+    localAvailable=true; engineReady=!!j.ready; llmAvailable=!!j.llm;
+    renderEngine();
+    if(engineReady){
+      clearTimeout(readyPollT); readyPollT=null;
+      if(!wasReady&&engine==='local') loadHotwords();
+    }else{
+      // 模型仍在加载：后台轮询，就绪后自动点亮 LED，无需用户手动重试
+      clearTimeout(readyPollT);
+      readyPollT=setTimeout(probeHealth,3000);
+    }
+    return true;
+  }catch(e){
+    localAvailable=false; engineReady=false; llmAvailable=false;
+    clearTimeout(readyPollT); readyPollT=null;
+    renderEngine();
+    return false;
+  }
+}
+lever.addEventListener('click',async ()=>{
+  if(isRecording()){ toast('录制中不可切换引擎'); return; }
+  if(engine==='local'){ engine='web'; renderEngine(); toast('已切换到浏览器识别（WEB）'); }
+  else{
+    engine='local'; renderEngine();
+    const ok=await probeHealth();
+    if(ok&&engineReady){ loadHotwords(); toast('已切换到本地引擎（LOCAL）'); }
+    else if(ok) toast('本地引擎加载中，就绪后自动切换');
+    else toast('本地引擎不可用，本次识别自动降级为浏览器识别');
+  }
+});
+
+function loadHotwords(){
+  fetch('/hotwords').then(r=>r.json()).then(j=>{
+    hotwords=(j&&j.words)||[];
+    renderHWBadge(); renderHWList();
+  }).catch(()=>{});
+}
+let saveT;
+function saveHotwords(){
+  if(!localAvailable) return;
+  clearTimeout(saveT);
+  saveT=setTimeout(()=>{
+    fetch('/hotwords',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({words:hotwords.filter(w=>w.trim())})})
+      .then(()=>toast('✅ 热词已保存，下次录音生效'))
+      .catch(()=>toast('⚠️ 保存失败：本地引擎未运行'));
+  },500);
+}
+function renderHWList(){
+  const list=$('hwList'); list.innerHTML='';
+  hotwords.forEach((w,i)=>{
+    const row=document.createElement('div'); row.className='hw-row';
+    const no=document.createElement('span'); no.className='no'; no.textContent=String(i+1).padStart(2,'0');
+    const inp=document.createElement('input'); inp.value=w; inp.placeholder='输入热词';
+    inp.addEventListener('input',()=>{ hotwords[i]=inp.value; renderHWBadge(); });
+    inp.addEventListener('change',saveHotwords);
+    inp.addEventListener('blur',saveHotwords);
+    const del=document.createElement('span'); del.className='del'; del.textContent='×';
+    del.addEventListener('click',()=>{ hotwords.splice(i,1); renderHWList(); renderHWBadge(); saveHotwords(); });
+    row.appendChild(no); row.appendChild(inp); row.appendChild(del);
+    list.appendChild(row);
+  });
+  $('hwCount').textContent='一行一个词 · 共 '+hotwords.filter(x=>x.trim()).length+' 条';
+}
+$('hwAdd').addEventListener('click',()=>{
+  hotwords.push(''); renderHWList();
+  const inputs=$('hwList').querySelectorAll('input');
+  if(inputs.length) inputs[inputs.length-1].focus();
+});
+
+/* ---------- 翻面 ---------- */
+function flip(){ device.classList.toggle('flipped'); renderHWList(); }
+cart.addEventListener('click',flip);
+$('backClose').addEventListener('click',flip);
+
+/* ---------- 录制入口 / 快捷键 ---------- */
+dpad.addEventListener('click',toggleRecord);
+window.addEventListener('blur',()=>{ if(isRecording()) activeProvider&&activeProvider.stop(); });
+window.addEventListener('keydown',e=>{
+  if(device.classList.contains('flipped')) return;
+  const t=e.target;
+  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
+  if(e.code==='Space'){ e.preventDefault(); if(!e.repeat) toggleRecord(); }
+  else if(e.code==='Escape') cancelRecord();
+});
+
+/* ---------- init ---------- */
+renderSlots(); renderHWBadge(); renderHWList(); renderEngine(); setStatus('idle');
+probeHealth().then(ok=>{
+  if(ok) loadHotwords();
+  else toast('🌐 未检测到本地引擎，已降级为浏览器识别（热词 / FIX / POL 不可用）');
+});
+})();
+</script>
+</body>
+</html>
