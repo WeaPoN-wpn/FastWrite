@@ -105,7 +105,7 @@ FastWrite/
 
 ## License
 
-TBD
+[MIT](LICENSE) © Wang Peinan
 
 ---
 
